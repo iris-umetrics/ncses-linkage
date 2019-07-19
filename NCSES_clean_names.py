@@ -1,45 +1,36 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-IRIS-NCSES Name Cleaning Overview
+IRIS-NCSES Name Cleaning
 
-This code cleans and normalizes name fields, month, and year of birth.
-It takes in a source name CSV which contains the following:
-    1. name_first_middle (concatenation of all given names: first(s) and/or middle(s))
-    2. name_last (last name as provided by source)
-    3. mob (month of birth)
-    4. yob (year of birth)
-Any other fields in the CSV will be ignored.
-
-Key steps of this program:
-    1. Create nickname lookup from nickname csv (NICKNAME_FILENAME)
-    2. Pull the source data input (INPUT_FILENAME)
-    3. Clean and normalize each field.
-    4. Apply nickname lookup function to assign a first name group from first given name.
-    5. Output OUTPUT_FILENAME in a CSV ready to be hashed.
-
+See README.md for details.
 """
 
-TESTING_ONLY = True
+#
+# IMPORTS
+#
 
-from pathlib import Path
-import string
-import unidecode
 import csv
+import string
+import time
+from pathlib import Path
+
+import unidecode
 
 #
 # CONFIGURATION
 #
 
-# Values within Path("...") can be changed to an absolute or a relative file location
-# e.g.  Path("rawdata.csv"); Path("C:/data/rawdata.csv"); Path("~/downloads/data.csv")
-INPUT_FILENAME = "./source_names.csv"
-OUTPUT_FILENAME = "./clean_names.csv"
-NICKNAME_FILENAME = "./nickname_mapping.csv"
+# Change values of these as needed.
+INPUT_FILENAME = r"./source_names.csv"
+OUTPUT_FILENAME = r"./clean_names.csv"
 
-if TESTING_ONLY:
-    INPUT_FILENAME = "C:/Users/matvan/AppData/Local/Temp/9/__test_extract2.csv"
-    OUTPUT_FILENAME = "C:/Users/matvan/AppData/Local/Temp/9/__test_cleaned2.csv"
+#
+# FIXED CONSTANTS
+#
+
+# This file is being distributed along with the scripts.
+NICKNAME_FILENAME = r"./nickname_mapping.csv"
 
 # We agreed on the empty string as a suitable missing/null value
 MISSING_VALUE = ""
@@ -55,62 +46,59 @@ OUTPUT_FIELDS = [
     "month",
     "year",
     "complete",
-    "given_first_word",  # 1a. this trio breaks first/middle after the first word
-    "given_middle_initial",  # 1b.
-    "given_all_but_first",  # 1c.
     "given_nickname",
-    "given_all_but_final",  # 2a. this trio breaks first/middle before the final word
-    "given_final_initial",  # 2b.
-    "given_final_word",  # 2c.
+    "given_first_word",
+    "given_middle_initial",
+    "given_all_but_first",
+    "given_all_but_final",
+    "given_final_initial",
+    "given_final_word",
 ]
 
 
 def main():
-
     nicknames = load_nicknames(NICKNAME_FILENAME)
-
     input_table = load_input(INPUT_FILENAME)
 
-    print("{} rows to process.".format(len(input_table)))
-
+    print("{:,} rows to process.".format(len(input_table)))
     output_table = [process_row(i, row, nicknames) for i, row in enumerate(input_table)]
+    print("{:,} rows complete.".format(len(output_table)))
 
-    write_output(output_table, OUTPUT_FILENAME)
-    print("Written to {}.".format(OUTPUT_FILENAME))
+    write_output(output_table, OUTPUT_FILENAME, OUTPUT_FIELDS)
 
 
-def load_nicknames(lookup_filename):
-    lookup_path = Path(lookup_filename).resolve(strict=True)
+def load_nicknames(filename):
+    lookup_path = Path(filename).resolve(strict=True)
     print("Creating nickname lookup from {}.".format(lookup_path))
     with lookup_path.open(encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
-        # If there is an excessively large quantity of records (multimillions)
-        # then we may want instead stream via generators to a tempfile.
         return {
-            initial_name_clean(row["raw_name"]): initial_name_clean(row["name_group"])
-            for row in reader
-            if row["raw_name"] == initial_name_clean(row["raw_name"])
+            clean_name(row["raw_name"]): clean_name(row["name_group"]) for row in reader
         }
 
 
-def load_input(input_filename):
-    input_path = Path(input_filename).resolve(strict=True)
+def load_input(filename):
+    input_path = Path(filename).resolve(strict=True)
     print("Reading source names from {}.".format(input_path))
+    # utf-8-sig should provide a little more flexibility, e.g., SSMS outputs a BOM
     with input_path.open(encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
         # If there is an excessively large quantity of records (multimillions)
         # then we may want instead stream via generators to a tempfile.
         all_input = [row for row in reader]
+    header_row = all_input[0]
     for field in INPUT_FIELDS:
-        assert (
-            field in all_input[0]
-        ), f"Required field {field} does not appear to be in the headers."
+        if field not in header_row:
+            print(header_row)
+            raise ValueError(
+                "Required field {} does not appear to be in the headers.".format(field)
+            )
     return all_input
 
 
 def process_row(i, row, nicknames):
-    if (i + 1) % 10000 == 0:
-        print("Processing row {}...".format(i + 1))
+    if (i + 1) % 100000 == 0:
+        print("    ...processing row {:,}...".format(i + 1))
 
     # Create the building blocks for the output: normalized given, family, month, year.
     normalized_row = normalize(row)
@@ -119,26 +107,32 @@ def process_row(i, row, nicknames):
     working_row = add_parsed_name_versions(normalized_row)
 
     # Create the nickname, either from the table or falling back to the plain name.
-    very_first = working_row.get("given_first_word", "")
+    very_first = working_row.get("given_first_word", MISSING_VALUE)
     working_row["given_nickname"] = nicknames.get(very_first, very_first)
 
-    # Remove all spaces from all fields
+    # Remove all spaces from all output fields (NOT from external IDs, etc.)
     final_row = {}
-    for key in working_row:
-        final_row[key] = working_row[key].replace(" ", "")
+    for key, value in working_row.items():
+        if key in OUTPUT_FIELDS:
+            value = value.replace(" ", "")
+        final_row[key] = value
     return final_row
 
 
 def normalize(row):
-    return {
-        "given": initial_name_clean(row["name_first_middle"]),
-        "family": initial_name_clean(row["name_last"]),
-        "month": clean_integer(row["mob"], minimum=1, maximum=12),
-        "year": clean_integer(row["yob"], minimum=1902, maximum=2010),
-    }
+    # Move as-is anything that is not one of the required INPUT_FIELDS
+    new_row = {k: v for k, v in row.items() if k not in INPUT_FIELDS}
+    # Create a cleaned version of each of the INPUT_FIELDS
+    new_row["given"] = clean_name(row["name_first_middle"])
+    new_row["family"] = clean_name(row["name_last"])
+    # For months, minimum = 1 and maximum = 12
+    new_row["month"] = clean_integer(row["mob"], minimum=1, maximum=12)
+    # In the data we're matching, birth years prior to 1902 all appear to be null
+    new_row["year"] = clean_integer(row["yob"], minimum=1902, maximum=2010)
+    return new_row
 
 
-def initial_name_clean(raw, remove_spaces=False):
+def clean_name(raw, remove_spaces=False):
     working = raw
     # Strip unicode down to ascii (e.g. Ë becomes E; ñ becomes n)
     working = unidecode.unidecode_expect_ascii(working)
@@ -152,11 +146,8 @@ def initial_name_clean(raw, remove_spaces=False):
 
 
 def clean_integer(raw_input, minimum, maximum):
-    # For months, minimum = 1 and maximum = 12
-    # For years, any UMETRICS date prior to 1902 is a null.
-    # So we are using: 1902, 2010.
-    # Strip out any leading zeros or nonsense
     try:
+        # Strip out any leading zeros or nonsense
         numbered = int(raw_input)
     except (ValueError, TypeError):
         # Anything that cannot be converted to an integer returns null
@@ -195,18 +186,25 @@ def add_parsed_name_versions(r):
     return r
 
 
-def write_output(output_table, output_file):
+def write_output(output_table, output_file, output_fields):
     output_path = Path(output_file).resolve()
     # Create the directory for this file if it doesn't already exist.
     output_path.parent.mkdir(exist_ok=True)
+    # Derive the fieldnames from the first row.
+    fields = output_table[0].keys()
+    assert set(output_fields) <= set(fields)
     with output_path.open("w", newline="", encoding="utf-8") as outfile:
-        writer = csv.DictWriter(
-            outfile, restval=MISSING_VALUE, fieldnames=OUTPUT_FIELDS
-        )
+        writer = csv.DictWriter(outfile, restval=MISSING_VALUE, fieldnames=fields)
         writer.writeheader()
         for row in output_table:
             writer.writerow(row)
+    print("Cleaned output written to {}.".format(output_path))
 
 
 if __name__ == "__main__":
+    scriptfile = Path(__file__).resolve()
+    starttime = time.time()
+    print("\n{} launched.".format(scriptfile))
     main()
+    elapsed = int(time.time() - starttime)
+    print("{} complete in {} seconds.\n".format(scriptfile, elapsed))
