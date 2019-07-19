@@ -4,6 +4,9 @@ This repository includes scripts and support files for 2019 IRIS-NCSES record li
 
 ## Setup
 
+This script requires the additional installation of at least one package (unidecode).
+Excecute this to ensure that all requirements to run the main script run are present:
+
 ```python -m pip install --user -r requirements.txt```
 
 ## Input File Cleaning
