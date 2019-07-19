@@ -203,6 +203,10 @@ def write_output(output_table, output_file, output_fields):
     output_path = Path(output_file).resolve()
     output_path.parent.mkdir(exist_ok=True)
 
+    # Derive the fieldnames from the first row.
+    fields = set(field for row in output_table for field in row)
+    assert set(output_fields) <= set(fields), "Not all output fields were created."
+
     with output_path.open("w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(outfile, restval=MISSING_VALUE, fieldnames=fields)
         writer.writeheader()
