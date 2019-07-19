@@ -13,7 +13,6 @@ See README.md for details.
 import csv
 import string
 import time
-from pathlib import Path
 
 import unidecode
 
@@ -76,19 +75,17 @@ def main():
 
 def load_nicknames(filename):
     """Create a raw_name -> name_group dict from two-field nickname lookup in filename"""
-    lookup_path = Path(filename).resolve(strict=True)
-    print("Creating nickname lookup from {}.".format(lookup_path))
-    with lookup_path.open(encoding="utf-8-sig") as infile:
+    print("Creating nickname lookup from {}.".format(filename))
+    with open(filename, "r", encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
         return {row["raw_name"]: row["name_group"] for row in reader}
 
 
 def load_input(filename):
     """Create and validate the fields found in a source file"""
-    input_path = Path(filename).resolve(strict=True)
-    print("Reading source names from {}.".format(input_path))
+    print("Reading source names from {}.".format(filename))
     # utf-8-sig should provide a little more flexibility, e.g., SSMS outputs a BOM
-    with input_path.open(encoding="utf-8-sig") as infile:
+    with open(filename, "r", encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
         # If there is an excessively large quantity of records (multimillions)
         # then we may want instead stream via generators to a tempfile.
@@ -199,24 +196,20 @@ def add_parsed_name_versions(r):
 
 def write_output(output_table, output_file, output_fields):
     """Write out the CSV"""
-    # Create the directory for this file if it doesn't already exist.
-    output_path = Path(output_file).resolve()
-    output_path.parent.mkdir(exist_ok=True)
-
     # Derive the fieldnames from the first row.
     fields = sorted(set(field for row in output_table for field in row))
     assert set(output_fields) <= set(fields), "Not all output fields were created."
 
-    with output_path.open("w", newline="", encoding="utf-8") as outfile:
+    with open(output_file, "w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(outfile, restval=MISSING_VALUE, fieldnames=fields)
         writer.writeheader()
         for row in output_table:
             writer.writerow(row)
-    print("Cleaned output written to {}.".format(output_path))
+    print("Cleaned output written to {}.".format(output_file))
 
 
 if __name__ == "__main__":
-    scriptfile = Path(__file__).resolve()
+    scriptfile = __file__
     starttime = time.time()
     print("\n{} launched.".format(scriptfile))
     main()
