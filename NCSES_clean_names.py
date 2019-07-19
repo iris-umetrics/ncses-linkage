@@ -1,23 +1,23 @@
 #!/usr/bin/env python
 # coding: utf-8
+"""
+# Overview
 
-# # Overview
-#
-# This notebook contains code to clean and normalize person name data. It is designed to work with a source_names.csv file, which contains the following fields:
-#
-# 1. first_name: This should actually be a concatenation of a first name and a middle name, as per descriptions of the SED/SDR PII data structure
-# 2. last_name: the last name
-# 4. mob: month of birth
-# 5. yob: year of birth
-#
-# Steps:
-# 1. Pull in name file
-# 2. Pull in nickname lookup file
-# 3. Apply the name cleaning function to relevant fields
-# 4. Apply the nickname normalization function to relevant fields
-# 5. Output a production CSV to be passed to hashing script
+This code to cleans and normalize person name data as well as month and year of birth.
+It is designed to work with a source_names.csv file, which contains the following:
+    1. first_name: Concatenation of all given names, i.e., first(s) and middle(s)
+    2. last_name
+    4. mob: month of birth
+    5. yob: year of birth
 
-# # Setup
+Key steps of this program:
+    1. Lookup nickname file
+    1. Pull the source data input (INPUT_FILE)
+    3. Clean and normalize each field.
+    4. Apply the nickname lookup function to normalized first word of each first name.
+    5. Output a production CSV (OUTPUT_FILE) ready to be hashed.
+
+"""
 
 from pathlib import Path
 import string
@@ -26,108 +26,161 @@ import csv
 
 # # Configuration
 
-# Change the values within Path("...") to an absolute or relative file location
-# e.g. Path("./data/rawdata.csv"); Path("C:/data/pii/prepped.csv"); Path("~/data.csv")
-
+# Values within Path("...") can be changed to an absolute or a relative file location
+# e.g.  Path("rawdata.csv"); Path("C:/data/rawdata.csv"); Path("~/downloads/data.csv")
 INPUT_FILE = Path("./source_names.csv").resolve(strict=True)
-
-NICKNAME_LOOKUP = Path("./nickname_mapping.csv").resolve(strict=True)
-
+NICKNAME_FILE = Path("./nickname_mapping.csv").resolve(strict=True)
 OUTPUT_FILE = Path("./clean_names.csv").resolve()
 
-NULL_VALUE = ""
+# We agreed on the empty string as a suitable missing/null value
+MISSING_VALUE = ""
+
+# These are required; other fields in INPUT_FILE will be ignored.
+INPUT_FIELDS = ["first_middle", "last_name", "mob", "yob"]
+
+# This is the list and order of the output fields.
+# The output field names are intentionally different from input field names.
+OUTPUT_FIELDS = [
+    "given",
+    "family",
+    "month",
+    "year",
+    "complete",
+    "given_first_word",  # this trio breaks first/middle after the first word
+    "given_middle_initial",  # .
+    "given_all_but_first",  # .
+    "given_nickname",
+    "given_all_but_final",  # this trio breaks first/middle before the final word
+    "given_final_initial",  # .
+    "given_final_word",  # .
+]
 
 
-def initial_name_field_clean(raw):
+def main():
+
+    print("Reading from {}.".format(INPUT_FILE))
+    input_table = load_input(INPUT_FILE)
+    print("{} rows to process.".format(len(input_table)))
+
+    nicknames = load_nicknames(NICKNAME_FILE)
+
+    output_table = [process_row(i, row, nicknames) for i, row in enumerate(input_table)]
+
+    write_output(output_table, OUTPUT_FILE)
+    print("Written to {}.".format(OUTPUT_FILE))
+
+
+def load_input(input_file):
+    with input_file.open(encoding="utf-8") as infile:
+        reader = csv.DictReader(infile)
+        # If there is an excessively large quantity of records (multimillions)
+        # then we may want instead stream via generators to a tempfile.
+        return [row for row in reader]
+
+
+def load_nicknames(lookup_file):
+    with Path(lookup_file).open(encoding="utf-8") as infile:
+        reader = csv.DictReader(infile)
+        # If there is an excessively large quantity of records (multimillions)
+        # then we may want instead stream via generators to a tempfile.
+        return {
+            initial_name_clean(row["raw_name"]): initial_name_clean(row["name_group"])
+            for row in reader
+            if row["raw_name"] == initial_name_clean(row["raw_name"])
+        }
+
+
+def process_row(i, row, nicknames):
+    if (i + 1) % 5 == 0:
+        print("Processing row {}...".format(i + 1))
+
+    # Create the building blocks for the output: normalized given, family, month, year.
+    normalized_row = normalize(row)
+
+    # Use the normalized fields to form first word, final word, initials, etc.
+    working_row = add_parsed_name_versions(normalized_row)
+
+    # Create the nickname, either from the table or falling back to the plain name.
+    very_first = working_row["given_first_word"]
+    working_row["given_nickname"] = nicknames.get(very_first, very_first)
+
+    # Remove all spaces from all fields
+    final_row = {}
+    for key in working_row:
+        final_row[key] = working_row[key].replace(" ", "")
+    return final_row
+
+
+def normalize(row):
+    return {
+        "given": initial_name_clean(row["first_name"]),
+        "family": initial_name_clean(row["last_name"]),
+        "month": clean_integer(row["mob"], minimum=1, maximum=12),
+        "year": clean_integer(row["yob"], minimum=1902, maximum=2010),
+    }
+
+
+def initial_name_clean(raw, remove_spaces=False):
     working = raw
     # Strip unicode down to ascii (e.g. Ë becomes E; ñ becomes n)
     working = unidecode.unidecode_expect_ascii(working)
     # Make all lowercase
-    return working.lower()
+    working = working.lower()
+    # Remove absolutely everything except the lowercase letters and spaces
+    acceptable = string.ascii_lowercase
+    if not remove_spaces:
+        acceptable = acceptable + " "
+    return "".join(c for c in working if c in acceptable)
 
 
-def final_name_field_clean(field):
-    # Remove absolutely everything except the lowercase letters (via ASCII codes)
-    return "".join(char for char in field if char in string.ascii_lowercase)
-
-
-def clean_date_part(raw_input, minimum, maximum):
+def clean_integer(raw_input, minimum, maximum):
     # For months, minimum = 1 and maximum = 12
-    # For years, any UMETRICS date prior to 1902 is a null. So we are using: 1902, 2010.
+    # For years, any UMETRICS date prior to 1902 is a null.
+    # So we are using: 1902, 2010.
     # Strip out any leading zeros or nonsense
     try:
         numbered = int(raw_input)
     except (ValueError, TypeError):
         # Anything that cannot be converted to an integer returns null
-        return NULL_VALUE
+        return MISSING_VALUE
     if numbered not in range(minimum, maximum + 1):
         # Anything outside the acceptable range returns null
-        return NULL_VALUE
+        return MISSING_VALUE
     return str(numbered)
 
 
-with INPUT_FILE.open(encoding="utf-8") as csvfile:
-    reader = csv.DictReader(csvfile)
-    input_table = (row for row in reader)
-    # print(row["first_name"], row["last_name"], row["mob"], row["yob"])
+def add_parsed_name_versions(r):
+    given = r["given"].split()
 
-    for row in input_table:
-        initial_cleaning = {
-            "first_middle": initial_name_field_clean(row["first_name"]),
-            "last": initial_name_field_clean(row["last_name"]),
-            "month": clean_date_part(row["mob"], 1, 12),
-            "year": clean_date_part(row["yob"], 1902, 2010),
-        }
+    r["given_first_word"] = given[0]
 
-        print(row)
-        print(initial_cleaning)
+    multiple_given = len(given) > 1
+    # If there is only one word in the given name, these will all be blanks
+    if multiple_given:
+        r["given_final_word"] = given[-1]
+        r["given_all_but_first"] = "".join(given[1:])
+        r["given_all_but_final"] = "".join(given[:-1])
 
+    # Initials for the 'middle given'
+    if r.get("given_all_but_first"):
+        r["given_middle_initial"] = r["given_all_but_first"][0]
+    # and for the 'final middle'
+    if r.get("given_final_word"):
+        r["given_final_initial"] = r["given_final_word"][0]
 
-# # Name Alias Lookup
-# #
-# # Many names have multiple aliases (e.g. Robert, Rob, Bob, etc.)
-# # This section groups names based on common name-alias pairings,
-# # then applies a single value to each group
-
-
-# # Convert name values to lowercase
-# lookup_input["raw_name"] = lookup_input["raw_name"].str.lower()
-# lookup_input["name_group"] = lookup_input["name_group"].str.lower()
+    r["complete"] = "".join((r["given"], r["family"]))
+    return r
 
 
-# # Join the alias table and the name table
-# alias_working = name_working.merge(
-#     lookup_input, how="left", left_on=fandmname, right_on="raw_name"
-# )
-# # Generate a flag to track the names impacted by the alias change for QA purposes
-# alias_working["alias_impact_flag"] = np.where(
-#     alias_working[fandmname] == alias_working["raw_name"], 1, 0
-# )
-# # Create a "first_nickname" field that contains the matching alias
-# # The original cleaned first name is maintained so that matches can be run on both hashes
-# alias_working["first_nickname"] = alias_working["name_group"].fillna(
-#     alias_working[fandmname]
-# )
-# alias_working.drop(["raw_name", "name_group"], axis=1, inplace=True)
+def write_output(output_table, output_file):
+    with output_file.open("w", encoding="utf-8") as outfile:
+        writer = csv.DictWriter(
+            outfile, restval=MISSING_VALUE, fieldnames=OUTPUT_FIELDS
+        )
+        writer.writeheader()
+        for row in output_table:
+            writer.writerow(row)
 
 
-# # # Export CSV
-# #
-# # This script will create a file in the output directory named "clean_names.csv" that can be loaded into the hashing script. It can also generate a QC CSV for looking at the changes to the data.
-
-
-# # Arrange the columns in order
-# name_cleaned = alias_working[
-#     [
-#         fandmname,
-#         "first_nickname",
-#         "middle_names",
-#         "middle_initial",
-#         lname,
-#         cname,
-#         mob,
-#         yob,
-#     ]
-# ]
-# # Export production file
-# name_cleaned.to_csv(output_directory + "clean_names.csv", encoding="utf_8", index=False)
+if __name__ == "__main__":
+    main()

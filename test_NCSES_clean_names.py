@@ -1,11 +1,13 @@
 import pytest
 
-from NCSES_clean_names import clean_date_part
+from NCSES_clean_names import clean_integer
 
 
 @pytest.mark.parametrize(
     "raw, clean",
     [
+        ("1", "1"),
+        ("10", "10"),
         ("12", "12"),
         ("012", "12"),
         (" 12", "12"),
@@ -15,10 +17,32 @@ from NCSES_clean_names import clean_date_part
     ],
 )
 def test_valid_clean_months(raw, clean):
-    assert clean_date_part(raw, 1, 12) == clean
+    assert clean_integer(raw, 1, 12) == clean
 
 
-@pytest.mark.parametrize("raw", ("0", "", None, "13", "a13", "94", "z", "!"))
+@pytest.mark.parametrize(
+    "raw",
+    (
+        None,
+        "",
+        " ",
+        "    ",
+        r"\t",
+        "\t",
+        r"\b",
+        "\b",
+        "-1",
+        "0",
+        "13",
+        "14",
+        "65536",
+        "a13",
+        "z",
+        "!",
+        "??",
+        "NULL",
+        "N/A",
+    ),
+)
 def test_invalid_clean_months(raw):
-    assert clean_date_part(raw, 1, 12) == ""
-
+    assert clean_integer(raw, 1, 12) == ""
