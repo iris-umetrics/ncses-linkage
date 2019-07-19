@@ -6,7 +6,7 @@ This repository includes scripts and support files for 2019 IRIS-NCSES record li
 
 ```python -m pip install --user -r requirements.txt```
 
-## IRIS-NCSES Name Cleaning
+## Input File Cleaning
 
 ```python NCSES_clean_names.py```
 
@@ -46,9 +46,9 @@ All other fields in the source CSV (e.g. IDs) will be passed directly to the cle
 
 ### Output fields
 
-The `OUTPUT_FIELDS` variable lists the outgoing fields:
+The script uses, the `OUTPUT_FIELDS` variable helps validate, these outgoing fields:
 
-- cleaned versions of the input fields
+- cleaned versions of each input field, with new names for each field
     - `given`
     - `family`
     - `month`

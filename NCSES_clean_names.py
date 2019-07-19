@@ -29,7 +29,7 @@ OUTPUT_FILENAME = r"./clean_names.csv"
 # FIXED CONSTANTS
 #
 
-# This file is being distributed along with the scripts.
+# This nickname file is being distributed along with the scripts.
 NICKNAME_FILENAME = r"./nickname_mapping.csv"
 
 # We agreed on the empty string as a suitable missing/null value
@@ -55,18 +55,21 @@ OUTPUT_FIELDS = [
     "given_final_word",
 ]
 
+#
+# MAIN
+#
+
 
 def main():
-    #
-    # main() will run when this script is executed as a standalone (see very end of file)
-    #
+    """Primary execution to run when this file is directly executed"""
 
-    nicknames = load_csv(NICKNAME_FILENAME)
+    nicknames = load_nicknames(NICKNAME_FILENAME)
     input_table = load_input(INPUT_FILENAME)
 
-    print("{:,} rows to process.".format(len(input_table)))
-    output_table = [process_row(i, row, nicknames) for i, row in enumerate(input_table)]
-    print("{:,} rows complete.".format(len(output_table)))
+    # Raise an exception unless input field is present in the input table.
+    assert set(INPUT_FIELDS) <= set(input_table[0]), "Not all input fields were found."
+
+    output_table = process_all_rows(input_table, nicknames)
 
     write_output(output_table, OUTPUT_FILENAME, OUTPUT_FIELDS)
 
@@ -89,16 +92,14 @@ def load_input(filename):
         reader = csv.DictReader(infile)
         # If there is an excessively large quantity of records (multimillions)
         # then we may want instead stream via generators to a tempfile.
-        all_input = [row for row in reader]
+        return [row for row in reader]
 
-    header_row = all_input[0]
-    for field in INPUT_FIELDS:
-        if field not in header_row:
-            print(header_row)
-            raise ValueError(
-                "Required field {} does not appear to be in the headers.".format(field)
-            )
-    return all_input
+
+def process_all_rows(input_table, nicknames):
+    print("{:,} rows to process.".format(len(input_table)))
+    result = [process_row(i, row, nicknames) for i, row in enumerate(input_table)]
+    print("{:,} rows complete.".format(len(result)))
+    return result
 
 
 def process_row(i, row, nicknames):
@@ -125,6 +126,7 @@ def process_row(i, row, nicknames):
 
 
 def normalize(row):
+    """Validate and clean each raw row into a new row."""
     # Move as-is anything that is not one of the required INPUT_FIELDS
     new_row = {k: v for k, v in row.items() if k not in INPUT_FIELDS}
     # Create a cleaned version of each of the INPUT_FIELDS
@@ -138,6 +140,7 @@ def normalize(row):
 
 
 def clean_name(raw, remove_spaces=False):
+    """Clean each input name down to lowercase ascii letters and spaces"""
     working = raw
     # Strip unicode down to ascii (e.g. Ë becomes E; ñ becomes n)
     working = unidecode.unidecode_expect_ascii(working)
@@ -151,6 +154,7 @@ def clean_name(raw, remove_spaces=False):
 
 
 def clean_integer(raw_input, minimum, maximum):
+    """Filter (stringed) integer field to allow only the specified range"""
     try:
         # Strip out any leading zeros or nonsense
         numbered = int(raw_input)
@@ -164,6 +168,7 @@ def clean_integer(raw_input, minimum, maximum):
 
 
 def add_parsed_name_versions(r):
+    """Create the new parsed versions of the input fields"""
     given = r["given"].split()
 
     try:
@@ -171,6 +176,7 @@ def add_parsed_name_versions(r):
     except IndexError:
         # Indicates that given has no words; i.e., no given name at all.
         r["complete"] = r["family"]
+        # With no given name, the function's job here is done.
         return r
 
     multiple_given = len(given) > 1
@@ -192,6 +198,7 @@ def add_parsed_name_versions(r):
 
 
 def write_output(output_table, output_file, output_fields):
+    """Write out the CSV"""
     output_path = Path(output_file).resolve()
     # Create the directory for this file if it doesn't already exist.
     output_path.parent.mkdir(exist_ok=True)
