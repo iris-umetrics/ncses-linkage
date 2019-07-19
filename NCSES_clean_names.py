@@ -199,12 +199,10 @@ def add_parsed_name_versions(r):
 
 def write_output(output_table, output_file, output_fields):
     """Write out the CSV"""
-    output_path = Path(output_file).resolve()
     # Create the directory for this file if it doesn't already exist.
+    output_path = Path(output_file).resolve()
     output_path.parent.mkdir(exist_ok=True)
-    # Derive the fieldnames from the first row.
-    fields = output_table[0].keys()
-    assert set(output_fields) <= set(fields), "Not all output fields were created."
+
     with output_path.open("w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(outfile, restval=MISSING_VALUE, fieldnames=fields)
         writer.writeheader()

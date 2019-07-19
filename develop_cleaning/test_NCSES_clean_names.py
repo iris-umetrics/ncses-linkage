@@ -1,6 +1,10 @@
+import os
 import re
-
+import sys
 import pytest
+from pathlib import Path
+
+sys.path.append(str(Path(".").resolve()))
 
 from NCSES_clean_names import load_nicknames, NICKNAME_FILENAME
 
