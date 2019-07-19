@@ -57,7 +57,11 @@ OUTPUT_FIELDS = [
 
 
 def main():
-    nicknames = load_nicknames(NICKNAME_FILENAME)
+    #
+    # main() will run when this script is executed as a standalone (see very end of file)
+    #
+
+    nicknames = load_csv(NICKNAME_FILENAME)
     input_table = load_input(INPUT_FILENAME)
 
     print("{:,} rows to process.".format(len(input_table)))
@@ -68,16 +72,16 @@ def main():
 
 
 def load_nicknames(filename):
+    """Create a raw_name -> name_group dict from two-field nickname lookup in filename"""
     lookup_path = Path(filename).resolve(strict=True)
     print("Creating nickname lookup from {}.".format(lookup_path))
     with lookup_path.open(encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
-        return {
-            clean_name(row["raw_name"]): clean_name(row["name_group"]) for row in reader
-        }
+        return {row["raw_name"]: row["name_group"] for row in reader}
 
 
 def load_input(filename):
+    """Create and validate the fields found in a source file"""
     input_path = Path(filename).resolve(strict=True)
     print("Reading source names from {}.".format(input_path))
     # utf-8-sig should provide a little more flexibility, e.g., SSMS outputs a BOM
@@ -86,6 +90,7 @@ def load_input(filename):
         # If there is an excessively large quantity of records (multimillions)
         # then we may want instead stream via generators to a tempfile.
         all_input = [row for row in reader]
+
     header_row = all_input[0]
     for field in INPUT_FIELDS:
         if field not in header_row:
@@ -192,7 +197,7 @@ def write_output(output_table, output_file, output_fields):
     output_path.parent.mkdir(exist_ok=True)
     # Derive the fieldnames from the first row.
     fields = output_table[0].keys()
-    assert set(output_fields) <= set(fields)
+    assert set(output_fields) <= set(fields), "Not all output fields were created."
     with output_path.open("w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(outfile, restval=MISSING_VALUE, fieldnames=fields)
         writer.writeheader()
