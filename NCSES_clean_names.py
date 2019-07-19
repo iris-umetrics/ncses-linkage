@@ -1,42 +1,51 @@
 #!/usr/bin/env python
 # coding: utf-8
 """
-# Overview
+IRIS-NCSES Name Cleaning Overview
 
-This code to cleans and normalize person name data as well as month and year of birth.
-It is designed to work with a source_names.csv file, which contains the following:
-    1. first_name: Concatenation of all given names, i.e., first(s) and middle(s)
-    2. last_name
-    4. mob: month of birth
-    5. yob: year of birth
+This code cleans and normalizes name fields, month, and year of birth.
+It takes in a source name CSV which contains the following:
+    1. name_first_middle (concatenation of all given names: first(s) and/or middle(s))
+    2. name_last (last name as provided by source)
+    3. mob (month of birth)
+    4. yob (year of birth)
+Any other fields in the CSV will be ignored.
 
 Key steps of this program:
-    1. Lookup nickname file
-    1. Pull the source data input (INPUT_FILE)
+    1. Create nickname lookup from nickname csv (NICKNAME_FILENAME)
+    2. Pull the source data input (INPUT_FILENAME)
     3. Clean and normalize each field.
-    4. Apply the nickname lookup function to normalized first word of each first name.
-    5. Output a production CSV (OUTPUT_FILE) ready to be hashed.
+    4. Apply nickname lookup function to assign a first name group from first given name.
+    5. Output OUTPUT_FILENAME in a CSV ready to be hashed.
 
 """
+
+TESTING_ONLY = True
 
 from pathlib import Path
 import string
 import unidecode
 import csv
 
-# # Configuration
+#
+# CONFIGURATION
+#
 
 # Values within Path("...") can be changed to an absolute or a relative file location
 # e.g.  Path("rawdata.csv"); Path("C:/data/rawdata.csv"); Path("~/downloads/data.csv")
-INPUT_FILE = Path("./source_names.csv").resolve(strict=True)
-NICKNAME_FILE = Path("./nickname_mapping.csv").resolve(strict=True)
-OUTPUT_FILE = Path("./clean_names.csv").resolve()
+INPUT_FILENAME = "./source_names.csv"
+OUTPUT_FILENAME = "./clean_names.csv"
+NICKNAME_FILENAME = "./nickname_mapping.csv"
+
+if TESTING_ONLY:
+    INPUT_FILENAME = "C:/Users/matvan/AppData/Local/Temp/9/__test_extract2.csv"
+    OUTPUT_FILENAME = "C:/Users/matvan/AppData/Local/Temp/9/__test_cleaned2.csv"
 
 # We agreed on the empty string as a suitable missing/null value
 MISSING_VALUE = ""
 
-# These are required; other fields in INPUT_FILE will be ignored.
-INPUT_FIELDS = ["first_middle", "last_name", "mob", "yob"]
+# These are required; other fields in INPUT_FILENAME will be ignored.
+INPUT_FIELDS = ["name_first_middle", "name_last", "mob", "yob"]
 
 # This is the list and order of the output fields.
 # The output field names are intentionally different from input field names.
@@ -46,40 +55,34 @@ OUTPUT_FIELDS = [
     "month",
     "year",
     "complete",
-    "given_first_word",  # this trio breaks first/middle after the first word
-    "given_middle_initial",  # .
-    "given_all_but_first",  # .
+    "given_first_word",  # 1a. this trio breaks first/middle after the first word
+    "given_middle_initial",  # 1b.
+    "given_all_but_first",  # 1c.
     "given_nickname",
-    "given_all_but_final",  # this trio breaks first/middle before the final word
-    "given_final_initial",  # .
-    "given_final_word",  # .
+    "given_all_but_final",  # 2a. this trio breaks first/middle before the final word
+    "given_final_initial",  # 2b.
+    "given_final_word",  # 2c.
 ]
 
 
 def main():
 
-    print("Reading from {}.".format(INPUT_FILE))
-    input_table = load_input(INPUT_FILE)
-    print("{} rows to process.".format(len(input_table)))
+    nicknames = load_nicknames(NICKNAME_FILENAME)
 
-    nicknames = load_nicknames(NICKNAME_FILE)
+    input_table = load_input(INPUT_FILENAME)
+
+    print("{} rows to process.".format(len(input_table)))
 
     output_table = [process_row(i, row, nicknames) for i, row in enumerate(input_table)]
 
-    write_output(output_table, OUTPUT_FILE)
-    print("Written to {}.".format(OUTPUT_FILE))
+    write_output(output_table, OUTPUT_FILENAME)
+    print("Written to {}.".format(OUTPUT_FILENAME))
 
 
-def load_input(input_file):
-    with input_file.open(encoding="utf-8") as infile:
-        reader = csv.DictReader(infile)
-        # If there is an excessively large quantity of records (multimillions)
-        # then we may want instead stream via generators to a tempfile.
-        return [row for row in reader]
-
-
-def load_nicknames(lookup_file):
-    with Path(lookup_file).open(encoding="utf-8") as infile:
+def load_nicknames(lookup_filename):
+    lookup_path = Path(lookup_filename).resolve(strict=True)
+    print("Creating nickname lookup from {}.".format(lookup_path))
+    with lookup_path.open(encoding="utf-8-sig") as infile:
         reader = csv.DictReader(infile)
         # If there is an excessively large quantity of records (multimillions)
         # then we may want instead stream via generators to a tempfile.
@@ -90,8 +93,23 @@ def load_nicknames(lookup_file):
         }
 
 
+def load_input(input_filename):
+    input_path = Path(input_filename).resolve(strict=True)
+    print("Reading source names from {}.".format(input_path))
+    with input_path.open(encoding="utf-8-sig") as infile:
+        reader = csv.DictReader(infile)
+        # If there is an excessively large quantity of records (multimillions)
+        # then we may want instead stream via generators to a tempfile.
+        all_input = [row for row in reader]
+    for field in INPUT_FIELDS:
+        assert (
+            field in all_input[0]
+        ), f"Required field {field} does not appear to be in the headers."
+    return all_input
+
+
 def process_row(i, row, nicknames):
-    if (i + 1) % 5 == 0:
+    if (i + 1) % 10000 == 0:
         print("Processing row {}...".format(i + 1))
 
     # Create the building blocks for the output: normalized given, family, month, year.
@@ -101,7 +119,7 @@ def process_row(i, row, nicknames):
     working_row = add_parsed_name_versions(normalized_row)
 
     # Create the nickname, either from the table or falling back to the plain name.
-    very_first = working_row["given_first_word"]
+    very_first = working_row.get("given_first_word", "")
     working_row["given_nickname"] = nicknames.get(very_first, very_first)
 
     # Remove all spaces from all fields
@@ -113,8 +131,8 @@ def process_row(i, row, nicknames):
 
 def normalize(row):
     return {
-        "given": initial_name_clean(row["first_name"]),
-        "family": initial_name_clean(row["last_name"]),
+        "given": initial_name_clean(row["name_first_middle"]),
+        "family": initial_name_clean(row["name_last"]),
         "month": clean_integer(row["mob"], minimum=1, maximum=12),
         "year": clean_integer(row["yob"], minimum=1902, maximum=2010),
     }
@@ -152,7 +170,12 @@ def clean_integer(raw_input, minimum, maximum):
 def add_parsed_name_versions(r):
     given = r["given"].split()
 
-    r["given_first_word"] = given[0]
+    try:
+        r["given_first_word"] = given[0]
+    except IndexError:
+        # Indicates that given has no words; i.e., no given name at all.
+        r["complete"] = r["family"]
+        return r
 
     multiple_given = len(given) > 1
     # If there is only one word in the given name, these will all be blanks
@@ -173,7 +196,10 @@ def add_parsed_name_versions(r):
 
 
 def write_output(output_table, output_file):
-    with output_file.open("w", encoding="utf-8") as outfile:
+    output_path = Path(output_file).resolve()
+    # Create the directory for this file if it doesn't already exist.
+    output_path.parent.mkdir(exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as outfile:
         writer = csv.DictWriter(
             outfile, restval=MISSING_VALUE, fieldnames=OUTPUT_FIELDS
         )
