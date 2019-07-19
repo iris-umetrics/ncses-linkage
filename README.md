@@ -69,3 +69,29 @@ The script uses, the `OUTPUT_FIELDS` variable helps validate, these outgoing fie
     - `given_all_but_final`
     - `given_final_initial`
     - `given_final_word`
+
+### Cleaning Example
+
+Input:
+```
+name_first_middle      Emilia Isobel Euphemia Rose       Kit
+name_last              Clarke                            Harington
+mob                    10                                ??
+yob                    1986                              1986
+``` 
+Output: 
+``` 
+given                  emiliaisobeleuphemiarose          kit                                          
+family                 clarke                            harington         
+month                  10                                
+year                   1986                              1986     
+complete               emiliaisobeleuphemiaroseclarke    kitharington       
+given_nickname         emilia                            christopher                                 
+given_first_word       emilia                            kit
+given_middle_initial   i
+given_all_but_first    isobeleuphemiarose
+given_all_but_final    emiliaisobeleuphemia
+given_final_initial    r
+given_final_word       rose
+```
+
